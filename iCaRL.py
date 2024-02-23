@@ -8,8 +8,10 @@ import torch.optim as optim
 from myNetwork import network
 from iCIFAR100 import iCIFAR100
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+import os
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_one_hot(target,num_class):
     one_hot=torch.zeros(target.shape[0],num_class).to(device)
@@ -34,8 +36,8 @@ class iCaRLmodel:
 
         self.train_transform = transforms.Compose([#transforms.Resize(img_size),
                                                   transforms.RandomCrop((32,32),padding=4),
-                                                  transforms.RandomHorizontalFlip(p=0.5),
-                                                  transforms.ColorJitter(brightness=0.24705882352941178),
+                                                  transforms.RandomHorizontalFlip(),
+                                                #   transforms.ColorJitter(brightness=0.24705882352941178),
                                                   transforms.ToTensor(),
                                                   transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))])
         
@@ -43,13 +45,13 @@ class iCaRLmodel:
                                                    transforms.ToTensor(),
                                                  transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))])
         
-        self.classify_transform=transforms.Compose([transforms.RandomHorizontalFlip(p=1.),
+        self.classify_transform=transforms.Compose([transforms.RandomHorizontalFlip(),
                                                     #transforms.Resize(img_size),
                                                     transforms.ToTensor(),
                                                    transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))])
         
         self.train_dataset = iCIFAR100('dataset', transform=self.train_transform, download=True)
-        self.test_dataset = iCIFAR100('dataset', test_transform=self.test_transform, train=False, download=True)
+        self.test_dataset = iCIFAR100('dataset', train=False, transform=self.test_transform, download=True)
 
         self.batchsize = batch_size
         self.memory_size=memory_size
@@ -72,6 +74,7 @@ class iCaRLmodel:
     def _get_train_and_test_dataloader(self, classes):
         self.train_dataset.getTrainData(classes, self.exemplar_set)
         self.test_dataset.getTestData(classes)
+
         train_loader = DataLoader(dataset=self.train_dataset,
                                   shuffle=True,
                                   batch_size=self.batchsize)
@@ -126,14 +129,26 @@ class iCaRLmodel:
                          p['lr'] =self.learning_rate/ 125
                      #opt = optim.SGD(self.model.parameters(), lr=self.learning_rate / 125,weight_decay=0.00001,momentum=0.9,nesterov=True,)
                   print("change learning rate:%.3f" % (self.learning_rate / 100))
-            for step, (indexs, images, target) in enumerate(self.train_loader):
+            
+            train_bar = tqdm(self.train_loader, total=len(self.train_loader))
+            for step, (indexs, images, target) in enumerate(train_bar):
                 images, target = images.to(device), target.to(device)
                 #output = self.model(images)
                 loss_value = self._compute_loss(indexs, images, target)
                 opt.zero_grad()
                 loss_value.backward()
                 opt.step()
-                print('epoch:%d,step:%d,loss:%.3f' % (epoch, step, loss_value.item()))
+                # print('epoch:%d,step:%d,loss:%.3f' % (epoch, step, loss_value.item()))
+                train_bar.set_description(
+                    desc="[%d/%d] Loss: %f  Step: %d  LR: %f"
+                    % (
+                        epoch,
+                        self.epochs,
+                        loss_value.item(),
+                        step,
+                        opt.param_groups[0]['lr']
+                    )
+                )
             accuracy = self._test(self.test_loader, 1)
             print('epoch:%d,accuracy:%.3f' % (epoch, accuracy))
         return accuracy
@@ -183,7 +198,8 @@ class iCaRLmodel:
         self.model.train()
         KNN_accuracy=self._test(self.test_loader,0)
         print("NMS accuracy："+str(KNN_accuracy.item()))
-        filename='model/accuracy:%.3f_KNN_accuracy:%.3f_increment:%d_net.pkl' % (accuracy, KNN_accuracy, i + 10)
+        filename='./model/accuracy_%.3f_KNN_accuracy_%.3f_increment_%d_net.pt' % (accuracy, KNN_accuracy, i + 10)
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         torch.save(self.model,filename)
         self.old_model=torch.load(filename)
         self.old_model.to(device)
@@ -252,3 +268,4 @@ class iCaRLmodel:
             x = np.argmin(x)
             result.append(x)
         return torch.tensor(result)
+

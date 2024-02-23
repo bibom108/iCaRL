@@ -2,14 +2,11 @@ from torchvision.datasets import CIFAR100
 import numpy as np
 from PIL import Image
 
-
 class iCIFAR100(CIFAR100):
     def __init__(self,root,
                  train=True,
                  transform=None,
                  target_transform=None,
-                 test_transform=None,
-                 target_test_transform=None,
                  download=False):
         super(iCIFAR100,self).__init__(root,
                                        train=train,
@@ -17,12 +14,13 @@ class iCIFAR100(CIFAR100):
                                        target_transform=target_transform,
                                        download=download)
 
-        self.target_test_transform=target_test_transform
-        self.test_transform=test_transform
+        self.transform=transform
+        self.target_transform=target_transform
         self.TrainData = []
         self.TrainLabels = []
         self.TestData = []
         self.TestLabels = []
+        self.train = train
 
     def concatenate(self,datas,labels):
         con_data=datas[0]
@@ -35,12 +33,14 @@ class iCIFAR100(CIFAR100):
     def getTestData(self, classes):
         datas,labels=[],[]
         for label in range(classes[0], classes[1]):
-            data = self.data[np.array(self.targets) == label]
+            data = self.test_data[np.array(self.test_labels) == label]
+            data = np.transpose(data, (0, 2, 3, 1))
             datas.append(data)
             labels.append(np.full((data.shape[0]), label))
         datas,labels=self.concatenate(datas,labels)
-        self.TestData=datas if self.TestData==[] else np.concatenate((self.TestData,datas),axis=0)
-        self.TestLabels=labels if self.TestLabels==[] else np.concatenate((self.TestLabels,labels),axis=0)
+        self.TestData=datas if not len(self.TestData) else np.concatenate((self.TestData,datas),axis=0)
+        self.TestLabels=labels if not len(self.TestLabels) else np.concatenate((self.TestLabels,labels),axis=0)
+        
         print("the size of test set is %s"%(str(self.TestData.shape)))
         print("the size of test label is %s"%str(self.TestLabels.shape))
 
@@ -54,49 +54,40 @@ class iCIFAR100(CIFAR100):
             labels=[np.full((length),label) for label in range(len(exemplar_set))]
 
         for label in range(classes[0],classes[1]):
-            data=self.data[np.array(self.targets)==label]
+            data=self.train_data[np.array(self.train_labels)==label]
+            data = np.transpose(data, (0, 2, 3, 1))
             datas.append(data)
             labels.append(np.full((data.shape[0]),label))
         self.TrainData,self.TrainLabels=self.concatenate(datas,labels)
+
         print("the size of train set is %s"%(str(self.TrainData.shape)))
         print("the size of train label is %s"%str(self.TrainLabels.shape))
 
-    def getTrainItem(self,index):
-        img, target = Image.fromarray(self.TrainData[index]), self.TrainLabels[index]
-
-        if self.transform:
-            img=self.transform(img)
-
-        if self.target_transform:
-            target=self.target_transform(target)
-
-        return index,img,target
-
-    def getTestItem(self,index):
-        img, target = Image.fromarray(self.TestData[index]), self.TestLabels[index]
-
-        if self.test_transform:
-            img=self.test_transform(img)
-
-        if self.target_test_transform:
-            target=self.target_test_transform(target)
-
-        return index, img, target
 
     def __getitem__(self, index):
-        if self.TrainData!=[]:
-            return self.getTrainItem(index)
-        elif self.TestData!=[]:
-            return self.getTestItem(index)
+        if self.train:
+            img  = Image.fromarray(self.TrainData[index]) 
+            target = self.TrainLabels[index]
+        else:
+            img, target = Image.fromarray(self.TestData[index]), self.TestLabels[index]
+
+        if self.transform:
+            img = self.transform(img)
+
+        if self.target_transform:
+            target = self.target_transform(target)
+        
+        return index, img, target
 
 
     def __len__(self):
-        if self.TrainData!=[]:
+        if self.train:
             return len(self.TrainData)
-        elif self.TestData!=[]:
+        else:
             return len(self.TestData)
 
     def get_image_class(self,label):
-        return self.data[np.array(self.targets)==label]
-
+        res = self.train_data[np.array(self.train_labels)==label]
+        res = np.transpose(res, (0, 2, 3, 1))
+        return res
 
